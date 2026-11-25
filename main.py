@@ -1,4 +1,3 @@
-
 import json
 import numpy as np
 import faiss
@@ -6,7 +5,7 @@ import faiss
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sentence_transformers import SentenceTransformer
+from fastembed import TextEmbedding
 
 # 1. Initialize FastAPI
 app = FastAPI(title="RAG Colosseum API")
@@ -27,18 +26,17 @@ if len(passages) != 50:
     raise ValueError("Knowledge base must contain exactly 50 passages")
 
 # 3. Load Embedding Model
-model = SentenceTransformer(
-    "sentence-transformers/all-MiniLM-L6-v2"
-)
+model = TextEmbedding(model_name="BAAI/bge-small-en-v1.5")
 
 # 4. Generate Embeddings
-embeddings = model.encode(
-    passages,
-    convert_to_numpy=True,
-    normalize_embeddings=True
-).astype("float32")
+embeddings = np.array(
+    list(model.embed(passages, batch_size=8)),
+    dtype="float32"
+)
 
 # 5. Create FAISS Index
+faiss.normalize_L2(embeddings)
+
 dimension = embeddings.shape[1]
 
 index = faiss.IndexFlatIP(dimension)
@@ -65,15 +63,12 @@ def query_rag(request: QueryRequest):
         }
 
     # Embed Question
-    query_embedding = model.encode(
-        [question],
-        convert_to_numpy=True,
-        normalize_embeddings=True
-    ).astype("float32")
+    query_vector = np.array([list(model.query_embed(question))[0]], dtype="float32")
 
     # FAISS Search
+    faiss.normalize_L2(query_vector)
     scores, indices = index.search(
-        query_embedding,
+        query_vector,
         min(request.top_k, len(passages))
     )
 
